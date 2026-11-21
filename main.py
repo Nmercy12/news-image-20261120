@@ -1,71 +1,39 @@
 #!/usr/bin/env python3
-"""Make.fun entry program for the "news-image-20261120" bounty.
-
-Copies the rendered newspaper front page (entry.png, stored next to this
-script) into the output directory as entry.png and verifies the result.
-
-Standard library only.
-"""
-
-from __future__ import annotations
-
 import os
 import shutil
-import sys
-from pathlib import Path
+import hashlib
 
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-SOURCE_NAME = "entry.png"
-OUTPUT_NAME = "entry.png"
+def main():
+    # Resolve entry.png relative to main.py's directory with CWD fallback
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    src_path = os.path.join(script_dir, "entry.png")
+    if not os.path.exists(src_path):
+        src_path = "entry.png"
 
+    # Read output directory from environment variable or default to /output
+    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
+    os.makedirs(out_dir, exist_ok=True)
 
-def main() -> int:
-    source = Path(__file__).resolve().parent / SOURCE_NAME
-    output_dir = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
-    destination = output_dir / OUTPUT_NAME
+    dest_path = os.path.join(out_dir, "entry.png")
 
-    if not source.is_file():
-        print(f"error: source image not found: {source}", file=sys.stderr)
-        return 1
+    # Copy image bytes exactly
+    shutil.copyfile(src_path, dest_path)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Check that output file exists and its size equals source file size
+    if not os.path.exists(dest_path) or os.path.getsize(dest_path) != os.path.getsize(src_path):
+        import sys
+        print(f"Error: Output file {dest_path} is missing or size mismatch.", file=sys.stderr)
+        sys.exit(1)
 
-    # copyfile (not copy2) keeps the output bytes exactly identical to the source.
-    shutil.copyfile(source, destination)
+    # Compute SHA-256 of the copied file
+    sha256_hash = hashlib.sha256()
+    with open(dest_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    file_sha256 = sha256_hash.hexdigest()
 
-    byte_count = destination.stat().st_size
-    with destination.open("rb") as handle:
-        header = handle.read(len(PNG_MAGIC))
-
-    if byte_count <= 0:
-        print(f"error: copied file is empty: {destination}", file=sys.stderr)
-        return 1
-    if header != PNG_MAGIC:
-        print(f"error: copied file is not a PNG: {destination}", file=sys.stderr)
-        return 1
-
-    # Validate dimensions from the IHDR chunk: 8-byte signature, 4-byte length,
-    # 4-byte type ("IHDR"), then 4-byte width and 4-byte height.
-    with destination.open("rb") as handle:
-        ihdr = handle.read(24)
-    if len(ihdr) < 24 or ihdr[12:16] != b"IHDR":
-        print(f"error: could not read PNG IHDR chunk: {destination}", file=sys.stderr)
-        return 1
-    width = int.from_bytes(ihdr[16:20], "big")
-    height = int.from_bytes(ihdr[20:24], "big")
-    if width != 1024 or height != 1024:
-        print(
-            f"error: unexpected PNG dimensions {width}x{height} "
-            f"(expected 1024x1024): {destination}",
-            file=sys.stderr,
-        )
-        return 1
-
-    print(f"source:      {source}")
-    print(f"destination: {destination}")
-    print(f"bytes:       {byte_count}")
-    return 0
-
+    print(f"Output image: {dest_path}")
+    print(f"SHA-256: {file_sha256}")
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
